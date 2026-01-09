@@ -118,6 +118,12 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: ${{ matrix.working-directory }}/.terraform/
+          key: ${{ runner.os }}-terraform-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.working-directory)) }}
+
       - name: FMT
         id: fmt
         run: terraform fmt -check
@@ -239,6 +245,12 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: ${{ matrix.working-directory }}/.terraform/
+          key: ${{ runner.os }}-terraform-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.working-directory)) }}
 
       - name: Download plan
         uses: actions/download-artifact@v7
