@@ -24,9 +24,6 @@ on:
       additional-environment-variables-json:
         description: 'JSON object containing additional environment variables (e.g., {"FOO": "value", "BAR": "value"})'
 
-env:
-  foo: ${{ secrets }}
-
 permissions:
   contents: read
   id-token: write
