@@ -1,0 +1,256 @@
+name: Terraform
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        type: string
+      working-directories:
+        type: string
+        required: true
+      gcp-service-account:
+        type: string
+        required: true
+      gcp-workload-identity-provider:
+        type: string
+        required: true
+      aws-role-to-assume:
+        type: string
+      aws-region:
+        type: string
+      tailscale-oauth-client-id:
+        type: string
+    secrets:
+      additional-environment-variables-json:
+        description: 'JSON object containing additional environment variables (e.g., {"FOO": "value", "BAR": "value"})'
+
+env:
+  foo: ${{ secrets }}
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  generate-matrix:
+    name: Generate Matrix
+    runs-on: [ubuntu-24.04]
+    outputs:
+      result: ${{ steps.generate-matrix.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ github.ref != 'refs/heads/main' && 1 || 0 }}
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+
+      - name: Generate matrix
+        id: generate-matrix
+        env:
+          WORKING_DIRECTORIES: ${{ inputs.working-directories }}
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          matrix="[]"
+          if [[ -n "${{ inputs.working-directory }}" ]]; then
+            artifact_name="terraform-plan-$(echo "${{ inputs.working-directory }}" | sed 's/[" :<>|*?\r\n\\\/]/_/g')"
+            matrix=$(echo $matrix | jq -c --arg wd "${{ inputs.working-directory }}" --arg an "$artifact_name" '. += [{"working-directory": $wd, "artifact-name": $an}]')
+          else
+            while IFS= read -r working_directory; do
+              if echo " $CHANGED_FILES " | grep -q -E " $working_directory/"; then
+                artifact_name="terraform-plan-$(echo "$working_directory" | sed 's/[" :<>|*?\r\n\\\/]/_/g')"
+                matrix=$(echo $matrix | jq -c --arg wd "$working_directory" --arg an "$artifact_name" '. += [{"working-directory": $wd, "artifact-name": $an}]')
+              fi
+            done <<< "$WORKING_DIRECTORIES"
+          fi
+          echo "result=$matrix" >> $GITHUB_OUTPUT
+
+  plan:
+    name: Plan ${{ matrix.working-directory }}
+    needs: [generate-matrix]
+    if: needs.generate-matrix.outputs.result != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.generate-matrix.outputs.result) }}
+    runs-on: [ubuntu-24.04]
+    defaults:
+      run:
+        working-directory: ${{ matrix.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3
+        with:
+          service_account: ${{ inputs.gcp-service-account }}
+          workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+
+      - name: Authenticate to AWS
+        if: inputs.aws-role-to-assume != '' && inputs.aws-region != ''
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Authenticate to Tailscale
+        if: inputs.tailscale-oauth-client-id != ''
+        run: |
+          token=$(curl -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api.tailscale.com/${{ inputs.tailscale-oauth-client-id }}" | jq -r '.value')
+          echo "::add-mask::$token"
+          echo "TAILSCALE_IDENTITY_TOKEN=$token" >> $GITHUB_ENV
+          echo "TAILSCALE_OAUTH_CLIENT_ID=${{ inputs.tailscale-oauth-client-id }}" >> $GITHUB_ENV
+
+      - name: Set additional environment variables
+        env:
+          ADDITIONAL_ENVIRONMENT_VARIABLES_JSON: ${{ secrets.additional-environment-variables-json || '{}' }}
+        run: |
+          echo "$ADDITIONAL_ENVIRONMENT_VARIABLES_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS= read -r line; do
+            echo "::add-mask::${line#*=}"
+            echo "$line" >> $GITHUB_ENV
+          done
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: FMT
+        id: fmt
+        run: terraform fmt -check
+
+      - name: Init
+        id: init
+        run: terraform init -input=false
+
+      - name: Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Show
+        id: show
+        run: terraform show -no-color tfplan
+
+      - name: Hide previous comment
+        if: github.event_name == 'pull_request' && !cancelled()
+        uses: int128/hide-comment-action@v1
+        with:
+          issue-number: ${{ github.event.number }}
+          ends-with: "*Pusher: @${{ github.actor }}, Working Directory: `${{ matrix.working-directory }}`*"
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request' && !cancelled()
+        uses: actions/github-script@v8
+        env:
+          PLAN: ${{ steps.show.outputs.stdout }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            <details><summary>Validation Output</summary>
+
+            \`\`\`\n
+            ${{ steps.validate.outputs.stdout }}
+            \`\`\`
+
+            </details>
+
+            #### Terraform Plan 📖\`${{ steps.show.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`diff\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Working Directory: \`${{ matrix.working-directory }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Upload plan
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.working-directory }}/tfplan
+          if-no-files-found: error
+          retention-days: 1
+
+  apply:
+    name: Apply ${{ matrix.working-directory }}
+    needs: [generate-matrix, plan]
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.generate-matrix.outputs.result) }}
+    runs-on: [ubuntu-24.04]
+    defaults:
+      run:
+        working-directory: ${{ matrix.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authenticate to GCP
+        uses: "google-github-actions/auth@v3"
+        with:
+          service_account: ${{ inputs.gcp-service-account }}
+          workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+
+      - name: Authenticate to AWS
+        if: inputs.aws-role-to-assume != '' && inputs.aws-region != ''
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Authenticate to Tailscale
+        if: inputs.tailscale-oauth-client-id != ''
+        run: |
+          token=$(curl -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api.tailscale.com/${{ inputs.tailscale-oauth-client-id }}" | jq -r '.value')
+          echo "::add-mask::$token"
+          echo "TAILSCALE_IDENTITY_TOKEN=$token" >> $GITHUB_ENV
+          echo "TAILSCALE_OAUTH_CLIENT_ID=${{ inputs.tailscale-oauth-client-id }}" >> $GITHUB_ENV
+
+      - name: Set additional environment variables
+        env:
+          ADDITIONAL_ENVIRONMENT_VARIABLES_JSON: ${{ secrets.additional-environment-variables-json || '{}'}}
+        run: |
+          echo "$ADDITIONAL_ENVIRONMENT_VARIABLES_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS= read -r line; do
+            echo "::add-mask::${line#*=}"
+            echo "$line" >> $GITHUB_ENV
+          done
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Download plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.working-directory }}
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Apply
+        run: terraform apply -input=false -auto-approve tfplan
