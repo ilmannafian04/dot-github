@@ -26,7 +26,7 @@ jobs:
           input_string: ${{ github.ref }}
           version_extractor_regex: '\/v(.*)$'
       - name: install nomad
-        uses: lucasmelin/setup-nomad@v0.1.0
+        uses: lucasmelin/setup-nomad@v2.0.0
         with:
             version: "1.6.0"
       - name: write variables into a file
