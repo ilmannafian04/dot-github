@@ -8,6 +8,9 @@ on:
       working-directories:
         type: string
         required: true
+      apply:
+        type: boolean
+        default: true
       gcp-service-account:
         type: string
         required: true
@@ -200,7 +203,7 @@ jobs:
   apply:
     name: Apply ${{ matrix.working-directory }}
     needs: [generate-matrix, plan]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.apply
     strategy:
       fail-fast: false
       matrix:
