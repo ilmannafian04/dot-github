@@ -256,7 +256,7 @@ jobs:
           key: ${{ runner.os }}-terraform-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.working-directory)) }}
 
       - name: Download plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact-name }}
           path: ${{ matrix.working-directory }}
