@@ -44,7 +44,7 @@ jobs:
       result: ${{ steps.generate-matrix.outputs.result }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: ${{ github.ref != 'refs/heads/main' && 1 || 0 }}
 
@@ -86,7 +86,7 @@ jobs:
         working-directory: ${{ matrix.working-directory }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v3
@@ -214,7 +214,7 @@ jobs:
         working-directory: ${{ matrix.working-directory }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Authenticate to GCP
         uses: "google-github-actions/auth@v3"
