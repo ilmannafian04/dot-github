@@ -42,7 +42,7 @@ concurrency:
 jobs:
   generate-matrix:
     name: Generate Matrix
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     outputs:
       result: ${{ steps.generate-matrix.outputs.result }}
     steps:
@@ -83,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.generate-matrix.outputs.result) }}
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     defaults:
       run:
         working-directory: ${{ matrix.working-directory }}
@@ -213,7 +213,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.generate-matrix.outputs.result) }}
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     defaults:
       run:
         working-directory: ${{ matrix.working-directory }}
