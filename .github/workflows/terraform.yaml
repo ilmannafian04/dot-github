@@ -116,6 +116,13 @@ jobs:
         env:
           ADDITIONAL_ENVIRONMENT_VARIABLES_JSON: ${{ secrets.additional-environment-variables-json || '{}' }}
         run: |
+          set -eo pipefail
+
+          if ! echo "$ADDITIONAL_ENVIRONMENT_VARIABLES_JSON" | jq -e 'type == "object"' > /dev/null; then
+            echo "::error title=Invalid input::additional-environment-variables-json must be a valid JSON object"
+            exit 1
+          fi
+
           echo "$ADDITIONAL_ENVIRONMENT_VARIABLES_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS= read -r line; do
             echo "::add-mask::${line#*=}"
             echo "$line" >> $GITHUB_ENV
@@ -246,6 +253,13 @@ jobs:
         env:
           ADDITIONAL_ENVIRONMENT_VARIABLES_JSON: ${{ secrets.additional-environment-variables-json || '{}'}}
         run: |
+          set -eo pipefail
+
+          if ! echo "$ADDITIONAL_ENVIRONMENT_VARIABLES_JSON" | jq -e 'type == "object"' > /dev/null; then
+            echo "::error title=Invalid input::additional-environment-variables-json must be a valid JSON object"
+            exit 1
+          fi
+
           echo "$ADDITIONAL_ENVIRONMENT_VARIABLES_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS= read -r line; do
             echo "::add-mask::${line#*=}"
             echo "$line" >> $GITHUB_ENV
